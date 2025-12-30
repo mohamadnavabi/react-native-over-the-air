@@ -2,6 +2,7 @@ import UIKit
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
+import OverTheAir
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -40,9 +41,9 @@ class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
 
   override func bundleURL() -> URL? {
 #if DEBUG
-    RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
+    return RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
 #else
-    Bundle.main.url(forResource: "main", withExtension: "jsbundle")
+    return OverTheAir.bundleURL() ?? Bundle.main.url(forResource: "main", withExtension: "jsbundle")
 #endif
   }
 }

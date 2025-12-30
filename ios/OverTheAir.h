@@ -2,4 +2,6 @@
 
 @interface OverTheAir : NSObject <NativeOverTheAirSpec>
 
++ (NSURL *)bundleURL;
+
 @end

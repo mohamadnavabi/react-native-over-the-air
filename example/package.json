@@ -4,10 +4,15 @@
   "private": true,
   "scripts": {
     "android": "react-native run-android",
+    "android:release": "react-native run-android --mode release",
     "ios": "react-native run-ios",
+    "ios:release": "react-native run-ios --mode Release",
     "start": "react-native start",
     "build:android": "react-native build-android --extra-params \"--no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a\"",
-    "build:ios": "react-native build-ios --mode Debug"
+    "build:ios": "react-native build-ios --mode Debug",
+    "bundle:android": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles/android-assets",
+    "bundle:ios": "react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles/ios-assets",
+    "bundle:all": "npm run bundle:android && npm run bundle:ios"
   },
   "dependencies": {
     "react": "19.2.0",
