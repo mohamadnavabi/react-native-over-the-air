@@ -57,3 +57,32 @@ export function getBundleVersion(): string {
 export function reloadBundle(): void {
   return OverTheAir.reloadBundle();
 }
+
+/**
+ * Synchronize the app with the manifest.
+ * Automatically handles mandatory updates by downloading them in the background.
+ * Non-mandatory updates can be handled manually using checkForUpdates().
+ * @returns Promise that resolves when sync is complete
+ */
+export async function sync(): Promise<void> {
+  try {
+    const update = await checkForUpdates();
+    if (update && update.isMandatory) {
+      console.log(
+        `[OTA] Mandatory update ${update.version} found, downloading...`
+      );
+      const success = await downloadBundle(update.url, update.version);
+      if (success) {
+        console.log(
+          `[OTA] Mandatory update ${update.version} installed successfully.`
+        );
+      } else {
+        console.warn(
+          `[OTA] Failed to download mandatory update ${update.version}.`
+        );
+      }
+    }
+  } catch (error) {
+    console.error('[OTA] Sync failed:', error);
+  }
+}

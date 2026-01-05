@@ -103,6 +103,20 @@ Instead of manually managing bundle URLs, this library uses a `manifest.json` fi
 ### Basic Flow
 
 ```js
+import { setBaseURL, sync } from 'react-native-over-the-air';
+
+// 1. Point to the folder containing manifest.json
+setBaseURL('https://your-server.com/ota-updates');
+
+// 2. Automatically handle mandatory updates in the background
+// This will download and install the bundle if isMandatory is true in manifest.json
+// The user won't notice anything until the next app restart
+sync();
+```
+
+### Manual Update Flow
+
+```js
 import {
   setBaseURL,
   checkForUpdates,
@@ -113,7 +127,7 @@ import {
 // 1. Point to the folder containing manifest.json
 setBaseURL('https://your-server.com/ota-updates');
 
-const syncApp = async () => {
+const checkAppUpdate = async () => {
   try {
     // 2. Check manifest for updates compatible with current native version
     const update = await checkForUpdates();
@@ -140,6 +154,10 @@ const syncApp = async () => {
 #### `setBaseURL(url: string): void`
 
 Sets the base URL where `manifest.json` is hosted.
+
+#### `sync(): Promise<void>`
+
+Synchronizes the app with the manifest. It checks for updates and if an update is marked as `isMandatory: true`, it downloads and installs it automatically in the background without reloading the app.
 
 #### `checkForUpdates(): Promise<UpdateInfo | null>`
 

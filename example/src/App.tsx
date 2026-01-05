@@ -17,6 +17,7 @@ import {
   reloadBundle,
   getAppVersion,
   getBundleVersion,
+  sync,
 } from 'react-native-over-the-air';
 
 const ROOT_URL = 'https://your-server.com/bundles';
@@ -44,6 +45,22 @@ export default function App() {
       Alert.alert('Success', 'Base URL has been set');
     } catch (error) {
       Alert.alert('Error', `Failed to set base URL: ${error}`);
+    }
+  };
+
+  const handleSync = async () => {
+    setLoading(true);
+    setStatus('Syncing (checking for mandatory updates)...');
+    try {
+      await sync();
+      setBundleVersion(getBundleVersion());
+      setStatus(
+        'Sync complete. If a mandatory update was found, it was downloaded in the background.'
+      );
+    } catch (error: any) {
+      setStatus(`Sync error: ${error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -156,9 +173,29 @@ export default function App() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>2. Check for Updates</Text>
+        <Text style={styles.sectionTitle}>2. Sync (Auto-Mandatory)</Text>
         <Text style={styles.description}>
-          Check if a new bundle is available from the base URL
+          Automatically download and install mandatory updates in the
+          background.
+        </Text>
+        <TouchableOpacity
+          style={[styles.button, styles.primaryButton]}
+          onPress={handleSync}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Sync Now</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>3. Check for Updates (Manual)</Text>
+        <Text style={styles.description}>
+          Manually check if an update is available and choose whether to
+          download it.
         </Text>
         <TouchableOpacity
           style={[styles.button, styles.secondaryButton]}
@@ -174,7 +211,7 @@ export default function App() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>3. Download Bundle (Manual URL)</Text>
+        <Text style={styles.sectionTitle}>4. Download Bundle (Manual URL)</Text>
         <Text style={styles.description}>
           Download a bundle manually by providing a URL and version
         </Text>
