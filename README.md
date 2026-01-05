@@ -98,6 +98,7 @@ Instead of manually managing bundle URLs, this library uses a `manifest.json` fi
 The easiest way to build and package your bundles is to use the built-in CLI tool. It handles bundling and zipping assets automatically for optimal OTA delivery.
 
 ### 1. Build Packages
+
 Run this in your project root:
 
 ```bash
@@ -112,9 +113,11 @@ npx ota bundle ios
 This will create an `ota-server-files` directory containing `android-package.zip` and `ios-package.zip`.
 
 ### 2. Upload to Server
+
 Place the `.zip` files and your `manifest.json` on your static server or CDN.
 
 ### 3. Update Manifest
+
 Update the `url` and increment the `version` in your `manifest.json`:
 
 ```json

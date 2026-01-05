@@ -1,6 +1,6 @@
 {
   "name": "react-native-over-the-air",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OTA for react-native",
   "main": "./lib/module/index.js",
   "bin": {
