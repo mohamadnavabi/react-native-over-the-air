@@ -31,7 +31,7 @@ class MainApplication : Application(), ReactApplication {
 
   override val reactHost: ReactHost by lazy {
     getDefaultReactHost(
-      ...
+      // ...
       jsBundleFilePath = OverTheAir.getBundleFilePath(this) // 2. Add this line
     )
   }
@@ -49,7 +49,7 @@ import OverTheAir // 1. Add import
 class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
   // ...
   override func bundleURL() -> URL? {
-    ...
+    // ...
     return OverTheAir.bundleURL() ?? super.bundleURL() // 2. Add this line
   }
 }
