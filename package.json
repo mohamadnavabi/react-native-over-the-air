@@ -1,8 +1,11 @@
 {
   "name": "react-native-over-the-air",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OTA for react-native",
   "main": "./lib/module/index.js",
+  "bin": {
+    "ota": "./bin/ota-cli.js"
+  },
   "types": "./lib/typescript/src/index.d.ts",
   "exports": {
     ".": {
@@ -17,6 +20,7 @@
     "lib",
     "android",
     "ios",
+    "bin",
     "cpp",
     "*.podspec",
     "react-native.config.js",

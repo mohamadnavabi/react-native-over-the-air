@@ -89,12 +89,45 @@ Instead of manually managing bundle URLs, this library uses a `manifest.json` fi
 - **Key (e.g., "1.0"):** This must **exactly match** your native app's version (`versionName` in `build.gradle` for Android, `CFBundleShortVersionString` in `Info.plist` for iOS).
 - **url:** The direct link to your compiled JS bundle file.
 - **version:** This should match your `package.json` version. This is the bundle version that gets displayed to users via `getBundleVersion()`. Increment this whenever you release a new JS bundle.
-- **isMandatory:** (Optional) Flag to indicate an update must be installed.
+- **isMandatory:** (Optional) flag to indicate an update must be installed.
 
-**Version Strategy:**
+---
 
-- **Native App Version** (`versionName`): Only changes when you publish a new app version to the store (e.g., `1.0` → `1.1`).
-- **Bundle Version** (`package.json` version): Changes with every OTA update (e.g., `0.0.1` → `0.0.2` → `0.0.3`). This allows multiple JS updates without republishing to the store.
+## Building & Publishing Updates
+
+The easiest way to build and package your bundles is to use the built-in CLI tool. It handles bundling and zipping assets automatically for optimal OTA delivery.
+
+### 1. Build Packages
+Run this in your project root:
+
+```bash
+# Build for all platforms (Recommended)
+npx ota bundle
+
+# Or build for a specific platform
+npx ota bundle android
+npx ota bundle ios
+```
+
+This will create an `ota-server-files` directory containing `android-package.zip` and `ios-package.zip`.
+
+### 2. Upload to Server
+Place the `.zip` files and your `manifest.json` on your static server or CDN.
+
+### 3. Update Manifest
+Update the `url` and increment the `version` in your `manifest.json`:
+
+```json
+{
+  "android": {
+    "1.0": {
+      "url": "https://your-server.com/ota/android-package.zip",
+      "version": "1.0.1",
+      "isMandatory": true
+    }
+  }
+}
+```
 
 ---
 
@@ -110,7 +143,6 @@ setBaseURL('https://your-server.com/ota-updates');
 
 // 2. Automatically handle mandatory updates in the background
 // This will download and install the bundle if isMandatory is true in manifest.json
-// The user won't notice anything until the next app restart
 sync();
 ```
 
@@ -124,32 +156,22 @@ import {
   reloadBundle,
 } from 'react-native-over-the-air';
 
-// 1. Point to the folder containing manifest.json
 setBaseURL('https://your-server.com/ota-updates');
 
 const checkAppUpdate = async () => {
-  try {
-    // 2. Check manifest for updates compatible with current native version
-    const update = await checkForUpdates();
-
-    if (update) {
-      console.log(`New version ${update.version} available!`);
-
-      // 3. Download the bundle
-      const success = await downloadBundle(update.url, update.version);
-
-      if (success) {
-        // 4. Reload to apply
-        reloadBundle();
-      }
+  const update = await checkForUpdates();
+  if (update) {
+    const success = await downloadBundle(update.url, update.version);
+    if (success) {
+      reloadBundle();
     }
-  } catch (error) {
-    console.error('OTA Error:', error);
   }
 };
 ```
 
-### API Reference
+---
+
+## API Reference
 
 #### `setBaseURL(url: string): void`
 
@@ -181,18 +203,6 @@ Returns the current native app version (e.g., "1.0"). This matches the `versionN
 #### `getBundleVersion(): string`
 
 Returns the current bundle version (e.g., "0.0.1"). This matches the `version` field from `package.json` and is updated whenever a new bundle is downloaded. Returns empty string if no bundle is installed.
-
----
-
-## Self-Hosting Guide
-
-1. **Build Bundles:**
-   ```bash
-   npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./index.android.bundle
-   npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./index.ios.bundle
-   ```
-2. **Upload:** Place bundles and your `manifest.json` on your server.
-3. **Update Manifest:** Increment the `version` field in `manifest.json` whenever you upload a new bundle.
 
 ## License
 

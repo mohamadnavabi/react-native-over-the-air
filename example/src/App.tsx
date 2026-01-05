@@ -133,6 +133,20 @@ export default function App() {
   useEffect(() => {
     setAppVersion(getAppVersion());
     setBundleVersion(getBundleVersion());
+
+    // Automatically sync on mount (checks for mandatory updates by default)
+    // const autoSync = async () => {
+    //   try {
+    //     console.log('[App] Starting automatic sync...');
+    //     await sync();
+    //     // Update bundle version display after sync might have finished
+    //     setBundleVersion(getBundleVersion());
+    //   } catch (error) {
+    //     console.error('[App] Auto-sync failed:', error);
+    //   }
+    // };
+
+    // autoSync();
   }, []);
 
   return (

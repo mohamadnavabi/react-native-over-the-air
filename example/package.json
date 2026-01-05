@@ -8,11 +8,16 @@
     "start": "react-native start",
     "release:android": "react-native run-android --mode release",
     "release:ios": "react-native run-ios --mode Release",
+    "release:all": "npm run release:android && npm run release:ios",
     "build:android": "react-native build-android --extra-params \"--no-daemon --console=plain -PreactNativeArchitectures=arm64-v8a\"",
     "build:ios": "react-native build-ios --mode Debug",
-    "bundle:android": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles/android-assets",
-    "bundle:ios": "react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles/ios-assets",
-    "bundle:all": "npm run bundle:android && npm run bundle:ios"
+    "bundle:android": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles",
+    "bundle:ios": "react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles",
+    "bundle:all": "npm run bundle:android && npm run bundle:ios",
+    "bundle:zip": "cd bundles && zip -r android-package.zip index.android.bundle drawable-* raw && zip -r ios-package.zip index.ios.bundle assets && cd ..",
+    "ota:android": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles && cd bundles && zip -r ../android-package.zip index.android.bundle && (zip -ur ../android-package.zip drawable-* raw 2>/dev/null || true) && cd ..",
+    "ota:ios": "react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles && cd bundles && zip -r ../ios-package.zip index.ios.bundle && (zip -ur ../ios-package.zip assets 2>/dev/null || true) && cd ..",
+    "ota:all": "npm run ota:android && npm run ota:ios"
   },
   "dependencies": {
     "react": "19.2.0",

@@ -17,6 +17,7 @@ import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
+import java.util.zip.ZipInputStream
 
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.bridge.Arguments
@@ -55,26 +56,66 @@ class OverTheAirModule(reactContext: ReactApplicationContext) :
         connection.setRequestProperty("X-Platform", "android")
 
         val responseCode = connection.responseCode
+        
         if (responseCode < 200 || responseCode >= 300) {
           promise.reject("HTTP_ERROR", "HTTP $responseCode")
           return@Thread
         }
 
-        val inputStream = connection.inputStream
-        val bundlePath = getBundlePath()
-        val bundleFile = File(bundlePath)
+        val appVersion = OverTheAir.getAppVersion(reactApplicationContext)
+        val otaDir = File(reactApplicationContext.filesDir, "ota/$appVersion")
         
-        // Create parent directory if it doesn't exist
-        bundleFile.parentFile?.mkdirs()
+        if (!otaDir.exists()) {
+            otaDir.mkdirs()
+        }
 
-        FileOutputStream(bundleFile).use { outputStream ->
-          inputStream.copyTo(outputStream)
+        val inputStream = connection.inputStream
+        val isZip = url.lowercase(Locale.ROOT).endsWith(".zip")
+
+        if (isZip) {
+            ZipInputStream(inputStream).use { zipInputStream ->
+                var entry = zipInputStream.nextEntry
+                while (entry != null) {
+                    val file = File(otaDir, entry.name)
+                    // Security check: Zip Slip
+                    if (!file.canonicalPath.startsWith(otaDir.canonicalPath)) {
+                        Log.w("OverTheAir", "Security warning: skipped entry ${entry.name}")
+                        zipInputStream.closeEntry()
+                        entry = zipInputStream.nextEntry
+                        continue
+                    }
+
+                    if (entry.isDirectory) {
+                        file.mkdirs()
+                    } else {
+                        file.parentFile?.mkdirs()
+                        FileOutputStream(file).use { outputStream ->
+                            val buffer = ByteArray(8192)
+                            var length: Int
+                            while (zipInputStream.read(buffer).also { length = it } > 0) {
+                                outputStream.write(buffer, 0, length)
+                            }
+                        }
+                    }
+                    zipInputStream.closeEntry()
+                    entry = zipInputStream.nextEntry
+                }
+            }
+        } else {
+            val bundleFile = File(otaDir, "index.android.bundle")
+            FileOutputStream(bundleFile).use { outputStream ->
+                val buffer = ByteArray(8192)
+                var length: Int
+                while (inputStream.read(buffer).also { length = it } > 0) {
+                    outputStream.write(buffer, 0, length)
+                }
+            }
         }
 
         promise.resolve(true)
-      } catch (e: Exception) {
+      } catch (e: Throwable) {
         Log.e("OverTheAir", "Failed to download bundle", e)
-        promise.reject("DOWNLOAD_ERROR", e.message ?: "Unknown error", e)
+        promise.reject("DOWNLOAD_ERROR", e.message ?: e.toString(), e)
       }
     }.start()
   }
@@ -154,8 +195,6 @@ class OverTheAirModule(reactContext: ReactApplicationContext) :
         if (!bundleFile.exists()) {
           Log.e("OverTheAir", "Bundle file does not exist at: $bundlePath")
         }
-
-        Log.d("OverTheAir", "Reloading app to apply bundle from: $bundlePath")
 
         val context = reactApplicationContext.applicationContext
         val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)

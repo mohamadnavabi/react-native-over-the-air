@@ -5,6 +5,7 @@
 #import <React/RCTUtils.h>
 #import <React/RCTRootView.h>
 #import <React/RCTBundleURLProvider.h>
+#import <SSZipArchive/SSZipArchive.h>
 
 @interface OverTheAir () <NativeOverTheAirSpec>
 @end
@@ -87,13 +88,36 @@
       return;
     }
     
-    NSString *bundlePath = [self getBundlePath];
-    NSError *writeError = nil;
-    BOOL success = [data writeToFile:bundlePath options:NSDataWritingAtomic error:&writeError];
-    
-    if (!success || writeError) {
-      reject(@"FILE_ERROR", writeError ? writeError.localizedDescription : @"Failed to write bundle file", writeError);
-      return;
+    BOOL isZip = [url.lowercaseString hasSuffix:@".zip"];
+    NSArray<NSURL *> *paths = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask];
+    NSURL *documentsDirectory = paths[0];
+    NSString *appVersion = [OverTheAir appVersion];
+    NSURL *otaDirectory = [[documentsDirectory URLByAppendingPathComponent:@"ota"] URLByAppendingPathComponent:appVersion];
+
+    if (![[NSFileManager defaultManager] fileExistsAtPath:otaDirectory.path]) {
+        [[NSFileManager defaultManager] createDirectoryAtURL:otaDirectory withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+
+    if (isZip) {
+        NSString *tempZipPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"temp_bundle.zip"];
+        [data writeToFile:tempZipPath atomically:YES];
+        
+        BOOL success = [SSZipArchive unzipFileAtPath:tempZipPath toDestination:otaDirectory.path];
+        [[NSFileManager defaultManager] removeItemAtPath:tempZipPath error:nil];
+        
+        if (!success) {
+            reject(@"UNZIP_ERROR", @"Failed to unzip bundle package", nil);
+            return;
+        }
+    } else {
+        NSString *bundlePath = [otaDirectory URLByAppendingPathComponent:@"index.ios.bundle"].path;
+        NSError *writeError = nil;
+        BOOL success = [data writeToFile:bundlePath options:NSDataWritingAtomic error:&writeError];
+        
+        if (!success || writeError) {
+            reject(@"FILE_ERROR", writeError ? writeError.localizedDescription : @"Failed to write bundle file", writeError);
+            return;
+        }
     }
     
     resolve(@YES);
