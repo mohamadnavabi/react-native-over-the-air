@@ -1,0 +1,17 @@
+{
+  "android": {
+    "1.0": {
+      "url": "https://your-server.com/bundles/index.android.bundle",
+      "version": "0.0.1",
+      "isMandatory": false
+    }
+  },
+  "ios": {
+    "1.0": {
+      "url": "https://your-server.com/bundles/index.ios.bundle",
+      "version": "0.0.1",
+      "isMandatory": false
+    }
+  }
+}
+

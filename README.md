@@ -1,6 +1,14 @@
 # react-native-over-the-air
 
-OTA (Over-The-Air) updates for React Native with self-hosted support
+OTA (Over-The-Air) updates for React Native with self-hosted support and manifest-based versioning.
+
+## Features
+
+- 🚀 **Self-Hosted:** Host your own bundles on any static server or CDN.
+- 📱 **Versioning:** Automatic native app version detection (CodePush style).
+- 📜 **Manifest Support:** Control updates via a `manifest.json` file.
+- ⚡ **TurboModule:** High-performance native implementation.
+- 📦 **Simple API:** Easy to integrate into your existing app.
 
 ## Installation
 
@@ -8,31 +16,91 @@ OTA (Over-The-Air) updates for React Native with self-hosted support
 npm install react-native-over-the-air
 ```
 
-### iOS
+### Native Setup (Required)
 
-```sh
-cd ios && pod install && cd ..
+To enable the app to load OTA bundles, you need to add a small piece of code to your native files.
+
+#### Android (`MainApplication.kt`)
+
+Import `OverTheAir` and use `getBundleFilePath` in your `reactHost` implementation:
+
+```kotlin
+import com.overtheair.OverTheAir // 1. Add import
+
+class MainApplication : Application(), ReactApplication {
+
+  override val reactHost: ReactHost by lazy {
+    getDefaultReactHost(
+      ...
+      jsBundleFilePath = OverTheAir.getBundleFilePath(this) // 2. Add this line
+    )
+  }
+  // ...
+}
 ```
 
-### Android
+#### iOS (`AppDelegate.swift`)
 
-To allow HTTP traffic (required if you're using `http://` URLs for your bundle server), add `android:usesCleartextTraffic="true"` to the `<application>` tag in your `android/app/src/main/AndroidManifest.xml`:
+Import `OverTheAir` and override the `bundleURL` method:
 
-```xml
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application
-      android:name=".MainApplication"
-      android:usesCleartextTraffic="true"
-      ...>
-    </application>
-</manifest>
+```swift
+import OverTheAir // 1. Add import
+
+class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
+  // ...
+  override func bundleURL() -> URL? {
+    ...
+    return OverTheAir.bundleURL() ?? super.bundleURL() // 2. Add this line
+  }
+}
 ```
 
-**Note:** For production, it's recommended to use HTTPS instead of HTTP for security.
+---
+
+## Server Setup (manifest.json)
+
+Instead of manually managing bundle URLs, this library uses a `manifest.json` file. Host this file at your `baseURL`.
+
+### Manifest Structure
+
+```json
+{
+  "android": {
+    // Native version name
+    "1.0": {
+      "url": "https://your-server.com/bundles/android-v1.bundle",
+      "version": "0.0.1",
+      "isMandatory": false
+    }
+  },
+  "ios": {
+    // Native marketing version
+    "1.0": {
+      "url": "https://your-server.com/bundles/ios-v1.bundle",
+      "version": "0.0.1",
+      "isMandatory": true
+    }
+  }
+}
+```
+
+**Important Fields:**
+
+- **Key (e.g., "1.0"):** This must **exactly match** your native app's version (`versionName` in `build.gradle` for Android, `CFBundleShortVersionString` in `Info.plist` for iOS).
+- **url:** The direct link to your compiled JS bundle file.
+- **version:** This should match your `package.json` version. This is the bundle version that gets displayed to users via `getBundleVersion()`. Increment this whenever you release a new JS bundle.
+- **isMandatory:** (Optional) Flag to indicate an update must be installed.
+
+**Version Strategy:**
+
+- **Native App Version** (`versionName`): Only changes when you publish a new app version to the store (e.g., `1.0` → `1.1`).
+- **Bundle Version** (`package.json` version): Changes with every OTA update (e.g., `0.0.1` → `0.0.2` → `0.0.3`). This allows multiple JS updates without republishing to the store.
+
+---
 
 ## Usage
 
-### Basic OTA Update Flow
+### Basic Flow
 
 ```js
 import {
@@ -42,112 +110,72 @@ import {
   reloadBundle,
 } from 'react-native-over-the-air';
 
-// 1. Set your self-hosted server URL
-setBaseURL('http://your-server.com');
+// 1. Point to the folder containing manifest.json
+setBaseURL('https://your-server.com/ota-updates');
 
-// 2. Check for updates
-const hasUpdate = await checkForUpdates();
-if (hasUpdate) {
-  // 3. Download the new bundle
-  const success = await downloadBundle(
-    'http://your-server.com/index.android.bundle'
-  );
-  if (success) {
-    // 4. Reload the app to use the new bundle
-    reloadBundle();
+const syncApp = async () => {
+  try {
+    // 2. Check manifest for updates compatible with current native version
+    const update = await checkForUpdates();
+
+    if (update) {
+      console.log(`New version ${update.version} available!`);
+
+      // 3. Download the bundle
+      const success = await downloadBundle(update.url, update.version);
+
+      if (success) {
+        // 4. Reload to apply
+        reloadBundle();
+      }
+    }
+  } catch (error) {
+    console.error('OTA Error:', error);
   }
-}
-```
-
-### Download Bundle from Direct URL
-
-```js
-import { downloadBundle, reloadBundle } from 'react-native-over-the-air';
-
-try {
-  const success = await downloadBundle(
-    'https://your-server.com/bundles/index.android.bundle'
-  );
-  if (success) {
-    console.log('Bundle downloaded successfully!');
-    reloadBundle();
-  }
-} catch (error) {
-  console.error('Failed to download bundle:', error);
-}
+};
 ```
 
 ### API Reference
 
 #### `setBaseURL(url: string): void`
 
-Sets the base URL where your bundles are hosted. This URL will be used by `checkForUpdates()`.
+Sets the base URL where `manifest.json` is hosted.
 
-- **Parameters:**
-  - `url`: The base URL (e.g., `'http://your-server.com'` or `'https://cdn.example.com'`)
+#### `checkForUpdates(): Promise<UpdateInfo | null>`
 
-#### `checkForUpdates(): Promise<boolean>`
+Fetches the manifest and compares it with the current native version and installed bundle.
 
-Checks if a new bundle is available from the configured base URL. Looks for `index.android.bundle` or `index.ios.bundle` based on platform.
+- **Returns:** `UpdateInfo` object or `null` if no update is needed.
+- `UpdateInfo`: `{ url: string, version: string, isMandatory: boolean }`
 
-- **Returns:** Promise that resolves to `true` if an update is available, `false` otherwise
-- **Throws:** Error if base URL is not set
+#### `downloadBundle(url: string, version: string): Promise<boolean>`
 
-#### `downloadBundle(url: string): Promise<boolean>`
-
-Downloads a bundle from the specified URL.
-
-- **Parameters:**
-  - `url`: Full URL to the bundle file
-- **Returns:** Promise that resolves to `true` if download was successful
-- **Throws:** Error if download fails
+Downloads the bundle and marks the specific version as installed.
 
 #### `reloadBundle(): void`
 
-Reloads the app to use the newly downloaded bundle.
+Triggers a native app reload to apply the new bundle.
 
-### Self-Hosting Setup
+#### `getAppVersion(): string`
 
-1. Build your React Native bundle:
+Returns the current native app version (e.g., "1.0"). This matches the `versionName` in `build.gradle` or `CFBundleShortVersionString` in `Info.plist`.
 
-   **Method 1: Using npm scripts (Recommended)**
+#### `getBundleVersion(): string`
 
+Returns the current bundle version (e.g., "0.0.1"). This matches the `version` field from `package.json` and is updated whenever a new bundle is downloaded. Returns empty string if no bundle is installed.
+
+---
+
+## Self-Hosting Guide
+
+1. **Build Bundles:**
    ```bash
-   npm run bundle:android  # Android only
-   npm run bundle:ios      # iOS only
-   npm run bundle:all      # Both platforms
+   npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./index.android.bundle
+   npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./index.ios.bundle
    ```
-
-   **Method 2: Using direct commands**
-
-   ```bash
-   # For Android
-   npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles
-
-   # For iOS
-   npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles
-
-   ```
-
-2. Host the bundle files on your server:
-
-   - Place `index.android.bundle` and `index.ios.bundle` in a publicly accessible directory
-   - Ensure your server supports CORS if needed
-   - Use HTTPS in production for security
-   - Enable gzip compression for smaller file sizes
-
-3. Update your app to use the OTA module (see Usage examples above)
-
-## Contributing
-
-- [Development workflow](CONTRIBUTING.md#development-workflow)
-- [Sending a pull request](CONTRIBUTING.md#sending-a-pull-request)
-- [Code of conduct](CODE_OF_CONDUCT.md)
+2. **Upload:** Place bundles and your `manifest.json` on your server.
+3. **Update Manifest:** Increment the `version` field in `manifest.json` whenever you upload a new bundle.
 
 ## License
 
 MIT
-
----
-
-Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)

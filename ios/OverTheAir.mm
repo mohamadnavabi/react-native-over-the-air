@@ -1,9 +1,13 @@
 #import "OverTheAir.h"
+#import <OverTheAirSpec/OverTheAirSpec.h>
 #import <React/RCTBridge.h>
 #import <React/RCTReloadCommand.h>
 #import <React/RCTUtils.h>
 #import <React/RCTRootView.h>
 #import <React/RCTBundleURLProvider.h>
+
+@interface OverTheAir () <NativeOverTheAirSpec>
+@end
 
 @implementation OverTheAir {
   NSUserDefaults *_userDefaults;
@@ -12,7 +16,8 @@
 + (NSURL *)bundleURL {
   NSArray<NSURL *> *paths = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask];
   NSURL *documentsDirectory = paths[0];
-  NSURL *otaDirectory = [documentsDirectory URLByAppendingPathComponent:@"ota"];
+  NSString *appVersion = [OverTheAir appVersion];
+  NSURL *otaDirectory = [[documentsDirectory URLByAppendingPathComponent:@"ota"] URLByAppendingPathComponent:appVersion];
   
   if (![[NSFileManager defaultManager] fileExistsAtPath:otaDirectory.path]) {
     [[NSFileManager defaultManager] createDirectoryAtURL:otaDirectory withIntermediateDirectories:YES attributes:nil error:nil];
@@ -25,6 +30,10 @@
   return nil;
 }
 
++ (NSString *)appVersion {
+  return [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"] ?: @"unknown";
+}
+
 - (instancetype)init {
   if (self = [super init]) {
     _userDefaults = [NSUserDefaults standardUserDefaults];
@@ -35,7 +44,8 @@
 - (NSString *)getBundlePath {
   NSArray<NSURL *> *paths = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask];
   NSURL *documentsDirectory = paths[0];
-  NSURL *otaDirectory = [documentsDirectory URLByAppendingPathComponent:@"ota"];
+  NSString *appVersion = [OverTheAir appVersion];
+  NSURL *otaDirectory = [[documentsDirectory URLByAppendingPathComponent:@"ota"] URLByAppendingPathComponent:appVersion];
   
   if (![[NSFileManager defaultManager] fileExistsAtPath:otaDirectory.path]) {
     [[NSFileManager defaultManager] createDirectoryAtURL:otaDirectory withIntermediateDirectories:YES attributes:nil error:nil];
@@ -59,6 +69,10 @@
   }
   
   NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
+  [configuration setHTTPAdditionalHeaders:@{
+    @"X-App-Version": [OverTheAir appVersion],
+    @"X-Platform": @"ios"
+  }];
   NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
   
   NSURLSessionDataTask *task = [session dataTaskWithURL:bundleURL completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -96,87 +110,67 @@
     return;
   }
   
-  NSString *bundleFileName = @"index.ios.bundle";
-  NSString *bundleURLString = [baseURL hasSuffix:@"/"] 
-    ? [baseURL stringByAppendingString:bundleFileName]
-    : [NSString stringWithFormat:@"%@/%@", baseURL, bundleFileName];
+  NSString *manifestURLString = [baseURL hasSuffix:@"/"] ? [baseURL stringByAppendingString:@"manifest.json"] : [NSString stringWithFormat:@"%@/%@", baseURL, @"manifest.json"];
+  NSURL *manifestURL = [NSURL URLWithString:manifestURLString];
   
-  NSURL *bundleURL = [NSURL URLWithString:bundleURLString];
-  if (!bundleURL) {
-    resolve(@NO);
-    return;
-  }
-  
-  NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:bundleURL];
-  [request setHTTPMethod:@"HEAD"];
-  
-  NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
-  NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
-  
-  NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-    if (error) {
-      resolve(@NO);
+  NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:manifestURL completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+    if (error || !data) {
+      resolve([NSNull null]);
       return;
     }
     
-    NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
-    if (httpResponse.statusCode < 200 || httpResponse.statusCode >= 300) {
-      resolve(@NO);
+    NSDictionary *manifest = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!manifest) {
+      resolve([NSNull null]);
       return;
     }
     
-    NSString *localBundlePath = [self getBundlePath];
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    if (![fileManager fileExistsAtPath:localBundlePath]) {
-      resolve(@YES);
+    NSDictionary *platformUpdates = [manifest objectForKey:@"ios"];
+    if (!platformUpdates) {
+      resolve([NSNull null]);
       return;
     }
     
-    NSDictionary *localAttributes = [fileManager attributesOfItemAtPath:localBundlePath error:nil];
-    NSDate *localLastModified = [localAttributes objectForKey:NSFileModificationDate];
-    unsigned long long localSize = [[localAttributes objectForKey:NSFileSize] unsignedLongLongValue];
-    
-    BOOL hasUpdate = NO;
-    BOOL canCompare = NO;
-    
-    NSString *lastModifiedString = [httpResponse.allHeaderFields objectForKey:@"Last-Modified"];
-    if (lastModifiedString) {
-      NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-      formatter.dateFormat = @"EEE, dd MMM yyyy HH:mm:ss zzz";
-      formatter.locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"];
-      formatter.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"GMT"];
-      
-      NSDate *remoteLastModified = [formatter dateFromString:lastModifiedString];
-      if (remoteLastModified) {
-        canCompare = YES;
-        if ([remoteLastModified compare:localLastModified] == NSOrderedDescending) {
-          hasUpdate = YES;
-        }
-      }
+    NSString *appVersion = [OverTheAir appVersion];
+    NSDictionary *updateInfo = [platformUpdates objectForKey:appVersion];
+    if (!updateInfo) {
+      resolve([NSNull null]);
+      return;
     }
     
-    NSString *contentLengthString = [httpResponse.allHeaderFields objectForKey:@"Content-Length"];
-    if (contentLengthString) {
-      unsigned long long remoteContentLength = [contentLengthString longLongValue];
-      if (remoteContentLength > 0) {
-        canCompare = YES;
-        if (remoteContentLength != localSize) {
-          hasUpdate = YES;
-        }
-      }
-    }
+    NSString *remoteVersion = [updateInfo objectForKey:@"version"];
+    NSString *versionKey = [NSString stringWithFormat:@"CurrentBundleVersion_%@", appVersion];
+    NSString *localVersion = [_userDefaults stringForKey:versionKey] ?: @"";
     
-    // If we can't reliably compare (no headers), default to true to allow download
-    // This ensures users can always try to download if bundle exists on server
-    if (!canCompare) {
-      hasUpdate = YES;
+    if (![remoteVersion isEqualToString:localVersion]) {
+      resolve(@{
+        @"url": [updateInfo objectForKey:@"url"],
+        @"version": remoteVersion,
+        @"isMandatory": [updateInfo objectForKey:@"isMandatory"] ?: @NO
+      });
+    } else {
+      resolve([NSNull null]);
     }
-    
-    resolve(@(hasUpdate));
   }];
   
   [task resume];
+}
+
+- (void)saveBundleVersion:(NSString *)version {
+  NSString *appVersion = [OverTheAir appVersion];
+  NSString *versionKey = [NSString stringWithFormat:@"CurrentBundleVersion_%@", appVersion];
+  [_userDefaults setObject:version forKey:versionKey];
+  [_userDefaults synchronize];
+}
+
+- (NSString *)getAppVersion {
+  return [OverTheAir appVersion];
+}
+
+- (NSString *)getBundleVersion {
+  NSString *appVersion = [OverTheAir appVersion];
+  NSString *versionKey = [NSString stringWithFormat:@"CurrentBundleVersion_%@", appVersion];
+  return [_userDefaults stringForKey:versionKey] ?: @"";
 }
 
 - (void)reloadBundle {

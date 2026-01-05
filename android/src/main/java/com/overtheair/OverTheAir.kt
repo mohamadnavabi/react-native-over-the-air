@@ -8,20 +8,33 @@ object OverTheAir {
     private const val BUNDLE_FILE = "index.android.bundle"
 
     /**
-     * Returns the path to the OTA bundle if it exists, otherwise returns null.
-     * This should be used in MainApplication to determine which bundle to load.
+     * Returns the native app version (e.g., "1.0.0").
+     */
+    fun getAppVersion(context: Context): String {
+        return try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            packageInfo.versionName ?: "unknown"
+        } catch (e: Exception) {
+            "unknown"
+        }
+    }
+
+    /**
+     * Returns the path to the OTA bundle for the CURRENT app version if it exists.
+     * This ensures that if the app is updated from the Store, the old OTA bundle is ignored.
      */
     fun getBundleFilePath(context: Context): String? {
-        val otaBundle = File(context.filesDir, "$OTA_DIR/$BUNDLE_FILE")
+        val appVersion = getAppVersion(context)
+        val otaBundle = File(context.filesDir, "$OTA_DIR/$appVersion/$BUNDLE_FILE")
         return if (otaBundle.exists()) otaBundle.absolutePath else null
     }
 
     /**
-     * Returns the path where the OTA bundle should be stored.
-     * Ensures the parent directory exists.
+     * Returns the working directory for the current version's OTA bundle.
      */
     internal fun getWorkingPath(context: Context): String {
-        val otaDir = File(context.filesDir, OTA_DIR)
+        val appVersion = getAppVersion(context)
+        val otaDir = File(context.filesDir, "$OTA_DIR/$appVersion")
         if (!otaDir.exists()) {
             otaDir.mkdirs()
         }

@@ -18,6 +18,12 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
+import com.facebook.react.bridge.WritableMap
+import com.facebook.react.bridge.Arguments
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+
 @ReactModule(name = OverTheAirModule.NAME)
 class OverTheAirModule(reactContext: ReactApplicationContext) :
   NativeOverTheAirSpec(reactContext) {
@@ -45,6 +51,8 @@ class OverTheAirModule(reactContext: ReactApplicationContext) :
         connection.requestMethod = "GET"
         connection.connectTimeout = 30000
         connection.readTimeout = 30000
+        connection.setRequestProperty("X-App-Version", OverTheAir.getAppVersion(reactApplicationContext))
+        connection.setRequestProperty("X-Platform", "android")
 
         val responseCode = connection.responseCode
         if (responseCode < 200 || responseCode >= 300) {
@@ -80,85 +88,61 @@ class OverTheAirModule(reactContext: ReactApplicationContext) :
           return@Thread
         }
 
-        val bundleFileName = "index.android.bundle"
-        val bundleURLString = if (baseURL.endsWith("/")) {
-          "$baseURL$bundleFileName"
-        } else {
-          "$baseURL/$bundleFileName"
-        }
-
-        val bundleURL = URL(bundleURLString)
-        val connection = bundleURL.openConnection() as HttpURLConnection
-        connection.requestMethod = "HEAD"
+        val manifestURLString = if (baseURL.endsWith("/")) "${baseURL}manifest.json" else "$baseURL/manifest.json"
+        val connection = URL(manifestURLString).openConnection() as HttpURLConnection
+        connection.requestMethod = "GET"
         connection.connectTimeout = 10000
         connection.readTimeout = 10000
 
-        val responseCode = connection.responseCode
-        if (responseCode < 200 || responseCode >= 300) {
-          promise.resolve(false)
+        if (connection.responseCode != 200) {
+          promise.resolve(null)
           return@Thread
         }
 
-        val localBundlePath = getBundlePath()
-        val localBundleFile = File(localBundlePath)
-
-        if (!localBundleFile.exists()) {
-          promise.resolve(true)
-          return@Thread
+        val reader = BufferedReader(InputStreamReader(connection.inputStream))
+        val response = StringBuilder()
+        var line: String?
+        while (reader.readLine().also { line = it } != null) {
+          response.append(line)
         }
+        reader.close()
 
-        val localLastModified = localBundleFile.lastModified()
-        val localSize = localBundleFile.length()
+        val manifest = JSONObject(response.toString())
+        val platformUpdates = manifest.optJSONObject("android") ?: return@Thread promise.resolve(null)
+        val appVersion = OverTheAir.getAppVersion(reactApplicationContext)
+        val updateInfo = platformUpdates.optJSONObject(appVersion) ?: return@Thread promise.resolve(null)
 
-        var hasUpdate = false
-        var canCompare = false
+        val remoteVersion = updateInfo.optString("version")
+        val localVersion = sharedPreferences.getString("CurrentBundleVersion_$appVersion", "")
 
-        // Check Last-Modified header
-        val lastModifiedString = connection.getHeaderField("Last-Modified")
-        if (lastModifiedString != null && lastModifiedString.isNotEmpty()) {
-          try {
-            val formatter = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US)
-            formatter.timeZone = TimeZone.getTimeZone("GMT")
-            val remoteLastModified = formatter.parse(lastModifiedString)
-            if (remoteLastModified != null) {
-              canCompare = true
-              if (remoteLastModified.time > localLastModified) {
-                hasUpdate = true
-              }
-            }
-          } catch (e: Exception) {
-            Log.w("OverTheAir", "Failed to parse Last-Modified header", e)
-          }
+        if (remoteVersion != localVersion) {
+          val result: WritableMap = Arguments.createMap()
+          result.putString("url", updateInfo.getString("url"))
+          result.putString("version", remoteVersion)
+          result.putBoolean("isMandatory", updateInfo.optBoolean("isMandatory", false))
+          promise.resolve(result)
+        } else {
+          promise.resolve(null)
         }
-
-        // Check Content-Length header
-        val contentLengthString = connection.getHeaderField("Content-Length")
-        if (contentLengthString != null && contentLengthString.isNotEmpty()) {
-          try {
-            val remoteContentLength = contentLengthString.toLong()
-            if (remoteContentLength > 0) {
-              canCompare = true
-              if (remoteContentLength != localSize) {
-                hasUpdate = true
-              }
-            }
-          } catch (e: Exception) {
-            Log.w("OverTheAir", "Failed to parse Content-Length header", e)
-          }
-        }
-
-        // If we can't reliably compare (no headers), default to true to allow download
-        // This ensures users can always try to download if bundle exists on server
-        if (!canCompare) {
-          hasUpdate = true
-        }
-
-        promise.resolve(hasUpdate)
       } catch (e: Exception) {
         Log.e("OverTheAir", "Failed to check for updates", e)
-        promise.resolve(false)
+        promise.resolve(null)
       }
     }.start()
+  }
+
+  override fun saveBundleVersion(version: String) {
+    val appVersion = OverTheAir.getAppVersion(reactApplicationContext)
+    sharedPreferences.edit().putString("CurrentBundleVersion_$appVersion", version).apply()
+  }
+
+  override fun getAppVersion(): String {
+    return OverTheAir.getAppVersion(reactApplicationContext)
+  }
+
+  override fun getBundleVersion(): String {
+    val appVersion = OverTheAir.getAppVersion(reactApplicationContext)
+    return sharedPreferences.getString("CurrentBundleVersion_$appVersion", "") ?: ""
   }
 
   override fun reloadBundle() {

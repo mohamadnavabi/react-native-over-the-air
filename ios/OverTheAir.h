@@ -1,7 +1,8 @@
-#import <OverTheAirSpec/OverTheAirSpec.h>
+#import <Foundation/Foundation.h>
 
-@interface OverTheAir : NSObject <NativeOverTheAirSpec>
+@interface OverTheAir : NSObject
 
 + (NSURL *)bundleURL;
++ (NSString *)appVersion;
 
 @end

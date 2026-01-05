@@ -15,9 +15,11 @@ import {
   downloadBundle,
   checkForUpdates,
   reloadBundle,
+  getAppVersion,
+  getBundleVersion,
 } from 'react-native-over-the-air';
 
-const ROOT_URL = 'http://localhost:8080/bundles';
+const ROOT_URL = 'https://your-server.com/bundles';
 const BUNDLE_FILE_NAME = `index.${
   Platform.OS === 'ios' ? 'ios' : 'android'
 }.bundle`;
@@ -49,15 +51,18 @@ export default function App() {
     setLoading(true);
     setStatus('Checking for updates...');
     try {
-      const hasUpdate = await checkForUpdates();
-      if (hasUpdate) {
-        setStatus('Update available!');
+      const update = await checkForUpdates();
+      if (update) {
+        setStatus(`Update available: ${update.version}`);
         Alert.alert(
           'Update Available',
-          'A new bundle is available. Download it?',
+          `A new version (${update.version}) is available. Download it?`,
           [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Download', onPress: handleDownloadFromBaseURL },
+            {
+              text: 'Download',
+              onPress: () => handleDownload(update.url, update.version),
+            },
           ]
         );
       } else {
@@ -72,22 +77,8 @@ export default function App() {
     }
   };
 
-  const handleDownloadFromBaseURL = async () => {
-    if (!baseURL.trim()) {
-      Alert.alert('Error', 'Please set a base URL first');
-      return;
-    }
-
-    const url = baseURL.endsWith('/')
-      ? `${baseURL}/${BUNDLE_FILE_NAME}`
-      : `${baseURL}/${BUNDLE_FILE_NAME}`;
-
-    await handleDownload(url);
-  };
-
-  const handleDownload = async (url?: string) => {
-    const downloadURL = url || bundleURL;
-    if (!downloadURL.trim()) {
+  const handleDownload = async (url: string, version: string = '1.0.0') => {
+    if (!url.trim()) {
       Alert.alert('Error', 'Please enter a bundle URL');
       return;
     }
@@ -95,8 +86,9 @@ export default function App() {
     setLoading(true);
     setStatus('Downloading bundle...');
     try {
-      const success = await downloadBundle(downloadURL.trim());
+      const success = await downloadBundle(url.trim(), version);
       if (success) {
+        setBundleVersion(version); // Update displayed bundle version
         setStatus('Bundle downloaded successfully!');
         Alert.alert(
           'Download Complete',
@@ -118,9 +110,26 @@ export default function App() {
     }
   };
 
+  const [appVersion, setAppVersion] = useState('');
+  const [bundleVersion, setBundleVersion] = useState('');
+
+  useEffect(() => {
+    setAppVersion(getAppVersion());
+    setBundleVersion(getBundleVersion());
+  }, []);
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>OTA Updates</Text>
+
+      <View style={styles.versionSection}>
+        <Text style={styles.versionLabel}>Native App Version:</Text>
+        <Text style={styles.versionValue}>{appVersion || 'Loading...'}</Text>
+        <Text style={styles.versionLabel}>Bundle Version:</Text>
+        <Text style={styles.versionValue}>
+          {bundleVersion || 'No bundle installed'}
+        </Text>
+      </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>1. Set Base URL</Text>
@@ -165,9 +174,9 @@ export default function App() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>3. Download Bundle (Direct URL)</Text>
+        <Text style={styles.sectionTitle}>3. Download Bundle (Manual URL)</Text>
         <Text style={styles.description}>
-          Download a bundle directly from a URL
+          Download a bundle manually by providing a URL and version
         </Text>
         <TextInput
           style={styles.input}
@@ -180,13 +189,13 @@ export default function App() {
         />
         <TouchableOpacity
           style={[styles.button, styles.secondaryButton]}
-          onPress={() => handleDownload()}
+          onPress={() => handleDownload(bundleURL)}
           disabled={loading}
         >
           {loading ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>Download Bundle</Text>
+            <Text style={styles.buttonText}>Download Manually</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -200,12 +209,13 @@ export default function App() {
       <View style={styles.infoSection}>
         <Text style={styles.infoTitle}>How to use:</Text>
         <Text style={styles.infoText}>
-          1. Set your base URL (e.g., http://your-server.com){'\n'}
-          2. Host your bundle files as: index.android.bundle and
-          index.ios.bundle{'\n'}
-          3. Use "Check for Updates" to check for new versions{'\n'}
-          4. Or use "Download Bundle" with a direct URL{'\n'}
-          5. After download, reload the app to use the new bundle
+          1. Set your base URL where manifest.json is hosted{'\n'}
+          2. Host a manifest.json file with this structure:{'\n'}
+          {'{ "android": { "1.0.0": { "url": "...", "version": "1" } } }'}
+          {'\n'}
+          3. Use "Check for Updates" to fetch the manifest and detect updates
+          {'\n'}
+          4. After download, reload the app to apply changes
         </Text>
       </View>
     </ScrollView>
@@ -231,6 +241,26 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 30,
     textAlign: 'center',
+  },
+  versionSection: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#4CAF50',
+  },
+  versionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2E7D32',
+    marginTop: 8,
+  },
+  versionValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1B5E20',
+    marginBottom: 4,
   },
   section: {
     backgroundColor: '#fff',
