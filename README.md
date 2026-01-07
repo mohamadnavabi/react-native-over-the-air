@@ -9,6 +9,7 @@ OTA (Over-The-Air) updates for React Native with self-hosted support and manifes
 - 📜 **Manifest Support:** Control updates via a `manifest.json` file.
 - ⚡ **TurboModule:** High-performance native implementation.
 - 📦 **Simple API:** Easy to integrate into your existing app.
+- 🛠️ **Incremental Builds:** Only include changed assets to reduce download size.
 
 ## Installation
 
