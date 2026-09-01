@@ -3,6 +3,7 @@ import { FlatCompat } from '@eslint/eslintrc';
 import js from '@eslint/js';
 import prettier from 'eslint-plugin-prettier';
 import { defineConfig } from 'eslint/config';
+import globals from 'globals';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,6 +25,14 @@ export default defineConfig([
     },
   },
   {
-    ignores: ['node_modules/', 'lib/'],
+    // The CLI and its tests are plain Node scripts, not React Native code.
+    files: ['bin/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.jest },
+      sourceType: 'commonjs',
+    },
+  },
+  {
+    ignores: ['node_modules/', 'lib/', 'example/ota-server-files/'],
   },
 ]);

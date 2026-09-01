@@ -1,15 +1,14 @@
 # react-native-over-the-air
 
-OTA (Over-The-Air) updates for React Native with self-hosted support and manifest-based versioning.
+Self-hosted OTA (Over-The-Air) updates for React Native, driven by a `manifest.json`
+you host yourself.
 
-## Features
+- HTTPS by default, with SHA-256 verification of every package
+- Automatic rollback when an update fails to boot
+- Bundles scoped to the native app version, so a Store update never runs a stale bundle
+- Download progress events, and incremental packages that ship only changed assets
 
-- 🚀 **Self-Hosted:** Host your own bundles on any static server or CDN.
-- 📱 **Versioning:** Automatic native app version detection (CodePush style).
-- 📜 **Manifest Support:** Control updates via a `manifest.json` file.
-- ⚡ **TurboModule:** High-performance native implementation.
-- 📦 **Simple API:** Easy to integrate into your existing app.
-- 🛠️ **Incremental Builds:** Only include changed assets to reduce download size.
+Requires React Native 0.76+ with the new architecture.
 
 ## Installation
 
@@ -17,196 +16,133 @@ OTA (Over-The-Air) updates for React Native with self-hosted support and manifes
 npm install react-native-over-the-air
 ```
 
-### Native Setup (Required)
-
-To enable the app to load OTA bundles, you need to add a small piece of code to your native files.
-
-#### Android (`MainApplication.kt`)
-
-Import `OverTheAir` and use `getBundleFilePath` in your `reactHost` implementation:
+### Android — `MainApplication.kt`
 
 ```kotlin
-import com.overtheair.OverTheAir // 1. Add import
+import com.overtheair.OverTheAir
 
 class MainApplication : Application(), ReactApplication {
-
   override val reactHost: ReactHost by lazy {
     getDefaultReactHost(
       // ...
-      jsBundleFilePath = OverTheAir.getBundleFilePath(this) // 2. Add this line
+      jsBundleFilePath = OverTheAir.getBundleFilePath(this)
     )
   }
-  // ...
 }
 ```
 
-#### iOS (`AppDelegate.swift`)
-
-Import `OverTheAir` and override the `bundleURL` method:
+### iOS — `AppDelegate.swift`
 
 ```swift
-import OverTheAir // 1. Add import
+import OverTheAir
 
 class ReactNativeDelegate: RCTDefaultReactNativeFactoryDelegate {
-  // ...
   override func bundleURL() -> URL? {
-    // ...
-    return OverTheAir.bundleURL() ?? super.bundleURL() // 2. Add this line
+    #if DEBUG
+      return super.bundleURL()  // let Metro win in development
+    #else
+      return OverTheAir.bundleURL() ?? super.bundleURL()
+    #endif
   }
 }
 ```
 
----
+Both calls also run the rollback check, so they must happen on every launch.
 
-## Server Setup (manifest.json)
-
-Instead of manually managing bundle URLs, this library uses a `manifest.json` file. Host this file at your `baseURL`.
-
-### Manifest Structure
-
-```json
-{
-  "android": {
-    // Native version name
-    "1.0": {
-      "url": "https://your-server.com/bundles/android-v1.bundle",
-      "version": "0.0.1",
-      "isMandatory": false
-    }
-  },
-  "ios": {
-    // Native marketing version
-    "1.0": {
-      "url": "https://your-server.com/bundles/ios-v1.bundle",
-      "version": "0.0.1",
-      "isMandatory": true
-    }
-  }
-}
-```
-
-**Important Fields:**
-
-- **Key (e.g., "1.0"):** This must **exactly match** your native app's version (`versionName` in `build.gradle` for Android, `CFBundleShortVersionString` in `Info.plist` for iOS).
-- **url:** The direct link to your compiled JS bundle file.
-- **version:** This should match your `package.json` version. This is the bundle version that gets displayed to users via `getBundleVersion()`. Increment this whenever you release a new JS bundle.
-- **isMandatory:** (Optional) flag to indicate an update must be installed.
-
----
-
-## Building & Publishing Updates
-
-The easiest way to build and package your bundles is to use the built-in CLI tool. It handles bundling and zipping assets automatically for optimal OTA delivery.
-
-### 1. Build Packages
-
-Run this in your project root:
+## Publishing an update
 
 ```bash
-# Build for all platforms (Recommended)
-npx ota bundle
-
-# Or build for a specific platform
-npx ota bundle android
-npx ota bundle ios
+npx ota bundle --manifest \
+  --app-version 1.0 \
+  --base-url https://your-server.com/ota
 ```
 
-This will create an `ota-server-files` directory containing `android-package.zip` and `ios-package.zip`.
+This writes `ota-server-files/` containing `android-package.zip`, `ios-package.zip` and a
+`manifest.json`. Upload its contents to the `--base-url` directory and the app picks the
+update up on its next `sync()`.
 
-### 2. Upload to Server
+`--app-version` is your **native** version (`versionName` / `CFBundleShortVersionString`).
+The bundle version defaults to `version` in `package.json`.
 
-Place the `.zip` files and your `manifest.json` on your static server or CDN.
+Gitignore `ota-server-files/`, but **commit** `ota-assets-manifest.*.json` — incremental
+builds diff against it. See [BUILD_BUNDLE.md](BUILD_BUNDLE.md) for the full CLI reference.
 
-### 3. Update Manifest
-
-Update the `url` and increment the `version` in your `manifest.json`:
+## manifest.json
 
 ```json
 {
   "android": {
     "1.0": {
       "url": "https://your-server.com/ota/android-package.zip",
-      "version": "1.0.1",
-      "isMandatory": true
+      "version": "1.1.0",
+      "isMandatory": false,
+      "hash": "9f2c…"
     }
   }
 }
 ```
 
----
+| Field | Meaning |
+| --- | --- |
+| key (`"1.0"`) | Must match the native app version exactly. No entry means no update. |
+| `url` | The `.zip` package, or a bare `.bundle` if your app has no assets. |
+| `version` | JS bundle version. Any change from the installed one is an update — publish an older string to roll back. |
+| `isMandatory` | Optional. `sync()` installs these without being asked. |
+| `hash` | Optional but recommended: SHA-256 of the file at `url`. A mismatch aborts the install. |
 
 ## Usage
-
-### Basic Flow
 
 ```js
 import { setBaseURL, sync } from 'react-native-over-the-air';
 
-// 1. Point to the folder containing manifest.json
-setBaseURL('https://your-server.com/ota-updates');
+setBaseURL('https://your-server.com/ota');
 
-// 2. Automatically handle mandatory updates in the background
-// This will download and install the bundle if isMandatory is true in manifest.json
-sync();
+const result = await sync();
+// 'up-to-date' | 'update-installed' | 'update-ignored' | 'error'
 ```
 
-### Manual Update Flow
+`sync()` never throws — failures come back as `{ status: 'error', error }`, so calling it
+on startup cannot take the app down.
+
+Or drive it yourself:
 
 ```js
-import {
-  setBaseURL,
-  checkForUpdates,
-  downloadBundle,
-  reloadBundle,
-} from 'react-native-over-the-air';
-
-setBaseURL('https://your-server.com/ota-updates');
-
-const checkAppUpdate = async () => {
-  const update = await checkForUpdates();
-  if (update) {
-    const success = await downloadBundle(update.url, update.version);
-    if (success) {
-      reloadBundle();
-    }
-  }
-};
+const update = await checkForUpdates();
+if (update) {
+  await downloadBundle(update.url, update.version, {
+    hash: update.hash,
+    onProgress: ({ receivedBytes, totalBytes }) => {},
+  });
+  reloadBundle();
+}
 ```
 
----
+### How installs are made safe
 
-## API Reference
+A package is streamed to a staging directory, verified, then swapped in with a single
+rename — the running bundle is untouched until then. The new bundle stays *pending* until
+it boots and `notifyAppReady()` runs (done for you one tick after this module loads). If
+the app launches again with an update still unconfirmed, the previous bundle is restored.
 
-#### `setBaseURL(url: string): void`
+## API
 
-Sets the base URL where `manifest.json` is hosted.
+| Function | Notes |
+| --- | --- |
+| `setBaseURL(url, { allowInsecureHttp? })` | Where `manifest.json` lives. Plain `http://` is rejected unless you opt in — only do that against a local dev server. |
+| `sync(options?): Promise<SyncResult>` | Checks and installs. Never throws. Options: `installOptionalUpdates` (default `false`), `installMode` (`'onNextRestart'` \| `'immediate'`), `onProgress`. |
+| `checkForUpdates(): Promise<UpdateInfo \| null>` | `null` when up to date; **rejects** if the manifest can't be fetched, so an outage is distinguishable from "nothing new". |
+| `downloadBundle(url, version, { hash?, onProgress? })` | Downloads, verifies, installs. Resolves `true` or rejects — never resolves `false`. |
+| `addDownloadProgressListener(fn)` | Returns `{ remove() }`. |
+| `notifyAppReady()` | Confirms the running bundle. Automatic; call it yourself only to gate on a later signal. |
+| `isPendingUpdate(): boolean` | True while an update is installed but unconfirmed. |
+| `resetToDefault()` | Deletes every downloaded bundle. Takes effect on the next reload. |
+| `reloadBundle()` | Applies the installed bundle. In-process on iOS; Android restarts the process on the first OTA install, since the bundle path is fixed when the `ReactHost` is built. |
+| `getAppVersion(): string` | Native app version, e.g. `"1.0"`. |
+| `getBundleVersion(): string` | Installed bundle version, or `""` while running the packaged one. |
 
-#### `sync(): Promise<void>`
-
-Synchronizes the app with the manifest. It checks for updates and if an update is marked as `isMandatory: true`, it downloads and installs it automatically in the background without reloading the app.
-
-#### `checkForUpdates(): Promise<UpdateInfo | null>`
-
-Fetches the manifest and compares it with the current native version and installed bundle.
-
-- **Returns:** `UpdateInfo` object or `null` if no update is needed.
-- `UpdateInfo`: `{ url: string, version: string, isMandatory: boolean }`
-
-#### `downloadBundle(url: string, version: string): Promise<boolean>`
-
-Downloads the bundle and marks the specific version as installed.
-
-#### `reloadBundle(): void`
-
-Triggers a native app reload to apply the new bundle.
-
-#### `getAppVersion(): string`
-
-Returns the current native app version (e.g., "1.0"). This matches the `versionName` in `build.gradle` or `CFBundleShortVersionString` in `Info.plist`.
-
-#### `getBundleVersion(): string`
-
-Returns the current bundle version (e.g., "0.0.1"). This matches the `version` field from `package.json` and is updated whenever a new bundle is downloaded. Returns empty string if no bundle is installed.
+`UpdateInfo` is `{ url, version, isMandatory?, hash? }`.
+Rejections carry a code: `NO_BASE_URL`, `MANIFEST_ERROR`, `INVALID_MANIFEST`,
+`INSECURE_URL`, `DOWNLOAD_ERROR`, `INTEGRITY_ERROR`, `ALREADY_INSTALLING`.
 
 ## License
 

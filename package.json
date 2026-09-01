@@ -1,6 +1,6 @@
 {
   "name": "react-native-over-the-air",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "OTA for react-native",
   "main": "./lib/commonjs/index.js",
   "bin": {
@@ -93,8 +93,8 @@
     "typescript": "^5.9.2"
   },
   "peerDependencies": {
-    "react": "*",
-    "react-native": "*"
+    "react": ">=18.0.0",
+    "react-native": ">=0.76.0"
   },
   "workspaces": [
     "example"

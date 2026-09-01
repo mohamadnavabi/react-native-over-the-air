@@ -1,304 +1,181 @@
-# Bundle Building Guide for OTA Updates
+# Building OTA packages
 
-This guide shows you how to build React Native bundles for use in OTA Updates.
+## The CLI
 
-## Recommended Method: Using the OTA CLI
+`npx ota bundle` runs Metro, collects the assets, and writes a ready-to-upload ZIP per
+platform into `ota-server-files/`.
 
-The easiest way to build and package your bundles for both Android and iOS is to use the built-in CLI tool. It handles bundling and zipping assets automatically.
-
-### Building for all platforms
 ```bash
+# Both platforms
 npx ota bundle
-```
 
-### Building for a specific platform
-```bash
+# One platform
 npx ota bundle android
-# OR
 npx ota bundle ios
 ```
 
-### Incremental Builds (Optimized Asset Packaging)
+### Options
 
-If your app has many assets and you only want to include new or changed assets in the OTA package, you can use incremental builds. This significantly reduces the size of the update for users.
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--entry-file <path>` | `index.js` | Metro entry point |
+| `--dev` | off | Build a development bundle |
+| `--no-minify` | minified | Disable minification |
+| `--sourcemap` | off | Write a source map beside the package (not shipped inside it) |
+| `--out-dir <dir>` | `ota-server-files` | Output directory |
+| `--incremental` | off | Ship only assets that changed since the last local build |
+| `--base-manifest <path>` | — | Use a specific asset manifest as the incremental base |
+| `--app-version <v>` | — | Native app version these packages target |
+| `--bundle-version <v>` | `version` in `package.json` | JS bundle version |
+| `--base-url <url>` | — | Public URL of the directory serving the packages |
+| `--manifest` | off | Write `manifest.json` next to the packages |
+| `--mandatory` | off | Mark generated manifest entries as mandatory |
 
-#### How it works:
-1. The CLI calculates hashes for all assets in the current build.
-2. It compares them with a manifest from a previous build.
-3. Assets that haven't changed are excluded from the ZIP package.
-4. The React Native app on the device will keep existing assets in the OTA directory and only update the ones included in the new ZIP.
+The CLI exits non-zero if Metro fails or the package cannot be written, so it is safe to
+run in CI.
 
-#### Usage:
-
-**1. Using the local manifest (automatic):**
-The CLI automatically saves a manifest named `ota-assets-manifest.{platform}.json` in your project root after each build. To build incrementally against the last build, use the `--incremental` flag:
+### Generating manifest.json
 
 ```bash
-npx ota bundle android --incremental
+npx ota bundle --manifest \
+  --app-version 1.0 \
+  --bundle-version 1.1.0 \
+  --base-url https://your-server.com/ota
 ```
 
-**2. Using a specific base manifest:**
-If you want to ensure the update is incremental relative to a specific version (e.g., the version currently in the App Store), you can provide a base manifest:
+`--manifest` merges into an existing `manifest.json` in the output directory rather than
+replacing it, so entries for other app versions survive. Each entry gets the package's
+SHA-256 as `hash`; the app refuses to install a package whose bytes do not match.
+
+Without `--manifest`, the CLI still prints each package's SHA-256 so you can paste it into
+a manifest you maintain by hand.
+
+## Incremental packages
+
+With many or large assets, most of a release is bytes the device already has.
 
 ```bash
-npx ota bundle android --base-manifest=./path/to/base-manifest.android.json
+npx ota bundle android --incremental --app-version 1.0
 ```
 
-> **Note:** For incremental updates to work reliably, the native side must not clear the OTA directory between updates. This library handles this automatically by versioning OTA directories per native app version.
+After every successful build the CLI writes `ota-assets-manifest.<platform>.json` — a
+hash per asset. `--incremental` diffs the new build against that file and:
 
-The CLI will create an `ota-server-files` directory containing:
-- `android-package.zip` (for Android)
-- `ios-package.zip` (for iOS)
+- omits assets whose hash is unchanged;
+- records assets that disappeared in a `.ota-remove.json` inside the package, which the
+  native side acts on so deleted assets are pruned rather than accumulating forever.
 
-## Alternative Method 1: Using Metro Bundler Commands manually
+The native side merges a package onto what is already installed, so the two halves fit
+together.
 
-### Building Bundle for iOS
+**Commit `ota-assets-manifest.*.json`.** It is the base for the next incremental build, so
+it has to be shared between machines and CI. `ota-server-files/` should be gitignored.
+
+To diff against a specific release instead of your last local build:
 
 ```bash
+npx ota bundle android --base-manifest ./releases/1.1.0/ota-assets-manifest.android.json
+```
+
+### Incremental packages and native releases
+
+Downloaded bundles are stored per native app version. A device that has just installed a
+new build from the store starts with an **empty** OTA directory, so an incremental package
+would arrive with nothing to merge onto and would be missing every skipped asset.
+
+Always ship a **full** package for the first release on a new native version. The CLI
+enforces this when it can: the asset manifest records the `--app-version` it was built for,
+and a build whose `--app-version` differs from its base manifest fails rather than
+producing a broken package.
+
+## Building manually
+
+The CLI is a thin wrapper around Metro, so you can do this yourself.
+
+```bash
+npx react-native bundle \
+  --platform android \
+  --dev false \
+  --entry-file index.js \
+  --bundle-output ./bundles/index.android.bundle \
+  --assets-dest ./bundles
+
 npx react-native bundle \
   --platform ios \
   --dev false \
   --entry-file index.js \
   --bundle-output ./bundles/index.ios.bundle \
-  --assets-dest ./bundles/ios-assets
+  --assets-dest ./bundles
 ```
 
-### Building Bundle for Both Platforms
-
-```bash
-# Android
-npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles/android-assets
-
-# iOS
-npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles/ios-assets
-```
-
-## Method 2: Using npm scripts
-
-You can add these scripts to your project's `package.json`:
-
-```json
-{
-  "scripts": {
-    "bundle:android": "react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles/android-assets",
-    "bundle:ios": "react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles/ios-assets",
-    "bundle:all": "npm run bundle:android && npm run bundle:ios"
-  }
-}
-```
-
-Then run:
-
-```bash
-npm run bundle:android  # Android only
-npm run bundle:ios      # iOS only
-npm run bundle:all      # Both platforms
-```
-
-## Method 3: Using Node.js Script (Optional)
-
-If you need more customization, you can create a `build-bundles.js` file:
-
-```javascript
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-
-const ENTRY_FILE = process.argv[2] || 'index.js';
-const BUNDLE_DIR = './bundles';
-
-// Create directory
-if (!fs.existsSync(BUNDLE_DIR)) {
-  fs.mkdirSync(BUNDLE_DIR, { recursive: true });
-}
-
-console.log(`Building bundles from entry file: ${ENTRY_FILE}`);
-console.log(`Output directory: ${BUNDLE_DIR}\n`);
-
-const platforms = ['android', 'ios'];
-
-platforms.forEach((platform) => {
-  console.log(`Building ${platform} bundle...`);
-
-  const bundleOutput = path.join(BUNDLE_DIR, `index.${platform}.bundle`);
-  const assetsDest = path.join(BUNDLE_DIR, `${platform}-assets`);
-
-  try {
-    execSync(
-      `npx react-native bundle --platform ${platform} --dev false --entry-file ${ENTRY_FILE} --bundle-output ${bundleOutput} --assets-dest ${assetsDest}`,
-      { stdio: 'inherit' }
-    );
-    console.log(`✓ ${platform} bundle built successfully!\n`);
-  } catch (error) {
-    console.error(`✗ Failed to build ${platform} bundle`);
-    process.exit(1);
-  }
-});
-
-console.log('✓ All bundles built successfully!');
-```
-
-Run it:
-
-```bash
-node build-bundles.js
-# Or with custom entry point:
-node build-bundles.js index.js
-```
-
-## Important Bundle Command Options
-
-### `--platform`
-
-Target platform: `android` or `ios`
-
-### `--dev`
-
-- `false`: For production (smaller and optimized code)
-- `true`: For development (includes warnings and debug info)
-
-### `--entry-file`
-
-Your application's entry point file (usually `index.js`)
-
-### `--bundle-output`
-
-Bundle output path
-
-### `--assets-dest`
-
-Assets output path (images, fonts, etc.)
-
-### Additional Options
-
-```bash
-# Minify bundle
---minify true
-
-# Source map
---sourcemap-output ./bundles/index.android.bundle.map
-
-# Reset cache
---reset-cache
-```
-
-## Hosting Bundles and Assets
-
-If your bundle includes assets (images, fonts, etc.), you should package them together in a ZIP file.
-
-### 1. Build the bundle with assets
-
-```bash
-# Android
-npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles
-
-# iOS
-npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles
-```
-
-### 2. Create a ZIP package
-
-For assets to work, the directory structure inside the ZIP must match what Metro produces.
-
-**For Android:**
+Then package everything Metro emitted, with the bundle at the root of the archive:
 
 ```bash
 cd bundles
-zip -r android-package.zip index.android.bundle drawable-* raw
+zip -r android-package.zip .   # or ios-package.zip
+shasum -a 256 android-package.zip
 ```
 
-**For iOS:**
+The layout inside the ZIP must match what Metro produced: `index.<platform>.bundle` at the
+top level, assets in the directories Metro created next to it (`drawable-*` and `raw` on
+Android, `assets` on iOS). Put the SHA-256 in your manifest as `hash`.
 
-```bash
-cd bundles
-zip -r ios-package.zip index.ios.bundle assets
-```
+If your app has no assets at all, you can point the manifest `url` straight at the
+`.bundle` file; the library detects the extension and skips unpacking.
 
-### 3. Update manifest.json
+## Hosting
 
-In your `manifest.json`, point to the `.zip` file instead of the `.bundle` file.
+- **Use HTTPS.** The library refuses plain `http://` unless you explicitly opt in with
+  `setBaseURL(url, { allowInsecureHttp: true })`, which is for local development only.
+- **Set `hash` in the manifest.** Without it, whoever controls the CDN controls the
+  JavaScript your app runs.
+- **Do not cache `manifest.json`.** The library sends `Cache-Control: no-cache`, but a CDN
+  that ignores it will pin your users to an old release. Cache the `.zip` files instead —
+  their URLs change per release.
+- **Serve the packages with `Content-Length`.** Progress reporting needs it; downloads work
+  without it, but `totalBytes` will be `0`.
+- Gzip on the server is fine and does not affect the hash: the library requests
+  `Accept-Encoding: identity` so it verifies the bytes you published.
 
-```json
-{
-  "android": {
-    "1.0": {
-      "url": "https://your-server.com/bundles/android-package.zip",
-      "version": "1.0.1",
-      "isMandatory": true
-    }
-  }
+### CORS
+
+Only needed if the packages are served from a different origin than expected:
+
+```nginx
+location /ota/ {
+  add_header 'Access-Control-Allow-Origin' '*';
+  add_header 'Access-Control-Allow-Methods' 'GET, HEAD, OPTIONS';
 }
 ```
 
-The library will automatically detect the `.zip` extension, download it, and extract it to the correct OTA directory.
-
-## Hosting Bundles
-
-After building bundles:
-
-1. **Upload to Server:**
-
-   ```bash
-   # Example with SCP
-   scp bundles/index.android.bundle user@server:/var/www/html/bundles/
-   scp bundles/index.ios.bundle user@server:/var/www/html/bundles/
-   ```
-
-2. **Configure CORS (if needed):**
-   If bundles are served from a different domain, you need to configure CORS:
-
-   ```nginx
-   # Nginx example
-   location /bundles/ {
-     add_header 'Access-Control-Allow-Origin' '*';
-     add_header 'Access-Control-Allow-Methods' 'GET, HEAD, OPTIONS';
-   }
-   ```
-
-3. **HTTPS in Production:**
-   Always use HTTPS in production for security.
-
-## Complete Example
+## Testing locally
 
 ```bash
-# 1. Build bundles
-npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles
-npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles
-
-# 2. Check bundle sizes
-ls -lh bundles/*.bundle
-
-# 3. Test bundle (optional)
-# You can test the bundle with a local HTTP server:
-cd bundles
-python3 -m http.server 8080
-# Then in the app: setBaseURL('http://localhost:8080')
+npx ota bundle android --manifest --app-version 1.0 --base-url http://localhost:8080
+cd ota-server-files && python3 -m http.server 8080
 ```
 
-## Important Notes
+In the app:
 
-- ✅ Always use `--dev false` for production
-- ✅ Compress bundles (gzip) on the server to reduce file size
-- ✅ Use HTTPS in production
-- ✅ Version control: add a version number or hash to the bundle name
-- ✅ Also host assets if you use assets
+```js
+setBaseURL('http://localhost:8080', { allowInsecureHttp: true });
+```
 
 ## Troubleshooting
 
-### Bundle Not Building
+**Metro fails to bundle.** Run from the project root, check `node_modules` is installed,
+and retry with a cleared cache (`npx react-native start --reset-cache` once, then rebuild).
 
-- Make sure you're in the project root directory
-- Make sure `node_modules` is installed
-- Use `--reset-cache`
+**The update installs but the app still runs the old code.** The bundle is *pending* until
+you reload. On Android the first OTA install restarts the process, because the bundle path
+is fixed when the `ReactHost` is built.
 
-### Bundle Size Too Large
+**The update keeps rolling back.** The new bundle is crashing before it finishes loading;
+the library restores the previous one on the next launch. Build the same package with
+`--dev` and run it locally to see the error.
 
-- Use `--dev false`
-- Make sure source maps are excluded
-- Use compression on the server
+**Images are missing after an incremental update.** The package was built against a base
+manifest from a different native app version — see above. Ship a full package.
 
-### Bundle Not Working
-
-- Check that the entry file is correct
-- Make sure all dependencies are installed
-- Check console errors
+**`INTEGRITY_ERROR`.** The bytes served do not match the manifest `hash`. Usually a stale
+CDN copy, or a manifest updated before the upload finished.

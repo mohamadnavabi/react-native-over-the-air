@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,52 +16,110 @@ import {
   downloadBundle,
   checkForUpdates,
   reloadBundle,
+  resetToDefault,
+  isPendingUpdate,
   getAppVersion,
   getBundleVersion,
   sync,
+  type DownloadProgressEvent,
 } from 'react-native-over-the-air';
 
-const ROOT_URL = 'https://ravanshenas.net/bundles';
-const BUNDLE_FILE_NAME = `index.${
-  Platform.OS === 'ios' ? 'ios' : 'android'
-}.bundle`;
+// Replace this with the folder on your own server that hosts manifest.json.
+const DEFAULT_BASE_URL = 'https://ravanshenas.net/bundles';
+const PACKAGE_FILE_NAME = `${Platform.OS}-package.zip`;
+
+function formatProgress(progress: DownloadProgressEvent | null): string {
+  if (!progress) {
+    return '';
+  }
+  const received = (progress.receivedBytes / 1024).toFixed(0);
+  if (!progress.totalBytes) {
+    return `${received} KiB`;
+  }
+  const percent = Math.round(
+    (progress.receivedBytes / progress.totalBytes) * 100
+  );
+  const total = (progress.totalBytes / 1024).toFixed(0);
+  return `${percent}%  (${received} / ${total} KiB)`;
+}
 
 export default function App() {
-  const [baseURL, setBaseURLInput] = useState(ROOT_URL);
-  const [bundleURL, setBundleURL] = useState(`${ROOT_URL}/${BUNDLE_FILE_NAME}`);
+  const [baseURLInput, setBaseURLInput] = useState(DEFAULT_BASE_URL);
+  const [packageURL, setPackageURL] = useState(
+    `${DEFAULT_BASE_URL}/${PACKAGE_FILE_NAME}`
+  );
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
+  const [progress, setProgress] = useState<DownloadProgressEvent | null>(null);
+  const [appVersion, setAppVersion] = useState('');
+  const [bundleVersion, setBundleVersion] = useState('');
+  const [pending, setPending] = useState(false);
+
+  const refreshVersions = useCallback(() => {
+    setAppVersion(getAppVersion());
+    setBundleVersion(getBundleVersion());
+    setPending(isPendingUpdate());
+  }, []);
 
   useEffect(() => {
-    setBaseURL(baseURL);
-  }, [baseURL]);
+    // The base URL only has to be set once, not on every keystroke.
+    setBaseURL(DEFAULT_BASE_URL);
+    refreshVersions();
+  }, [refreshVersions]);
 
   const handleSetBaseURL = () => {
-    if (!baseURL.trim()) {
+    const url = baseURLInput.trim();
+    if (!url) {
       Alert.alert('Error', 'Please enter a base URL');
       return;
     }
     try {
-      setStatus(`Base URL set to: ${baseURL}`);
-      Alert.alert('Success', 'Base URL has been set');
-    } catch (error) {
-      Alert.alert('Error', `Failed to set base URL: ${error}`);
+      // Plain http is rejected unless you opt in, which you should only do
+      // against a local development server.
+      setBaseURL(url, { allowInsecureHttp: url.startsWith('http://') });
+      setPackageURL(`${url.replace(/\/+$/, '')}/${PACKAGE_FILE_NAME}`);
+      setStatus(`Base URL set to: ${url}`);
+    } catch (error: any) {
+      Alert.alert('Error', `Failed to set base URL: ${error.message}`);
     }
   };
 
   const handleSync = async () => {
     setLoading(true);
-    setStatus('Syncing (checking for mandatory updates)...');
-    try {
-      await sync();
-      setBundleVersion(getBundleVersion());
-      setStatus(
-        'Sync complete. If a mandatory update was found, it was downloaded in the background.'
-      );
-    } catch (error: any) {
-      setStatus(`Sync error: ${error.message}`);
-    } finally {
-      setLoading(false);
+    setProgress(null);
+    setStatus('Syncing...');
+    // sync() reports failures in its result rather than throwing.
+    const result = await sync({
+      installOptionalUpdates: true,
+      onProgress: setProgress,
+    });
+    refreshVersions();
+    setLoading(false);
+    setProgress(null);
+
+    switch (result.status) {
+      case 'up-to-date':
+        setStatus('Already running the latest bundle.');
+        break;
+      case 'update-ignored':
+        setStatus(
+          `Optional update ${result.update?.version} was not installed.`
+        );
+        break;
+      case 'update-installed':
+        setStatus(`Installed ${result.update?.version}. Reload to apply.`);
+        Alert.alert(
+          'Update installed',
+          'Reload the app to use the new bundle?',
+          [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Reload now', onPress: reloadBundle },
+          ]
+        );
+        break;
+      case 'error':
+        setStatus(`Sync failed: ${result.error?.message}`);
+        break;
     }
   };
 
@@ -70,24 +128,27 @@ export default function App() {
     setStatus('Checking for updates...');
     try {
       const update = await checkForUpdates();
-      if (update) {
-        setStatus(`Update available: ${update.version}`);
-        Alert.alert(
-          'Update Available',
-          `A new version (${update.version}) is available. Download it?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Download',
-              onPress: () => handleDownload(update.url, update.version),
-            },
-          ]
-        );
-      } else {
+      if (!update) {
         setStatus('No updates available');
-        Alert.alert('No Updates', 'You are using the latest version');
+        Alert.alert('No updates', 'You are running the latest bundle.');
+        return;
       }
+      setStatus(`Update available: ${update.version}`);
+      Alert.alert(
+        'Update available',
+        `Version ${update.version} is available. Download it?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Download',
+            onPress: () =>
+              handleDownload(update.url, update.version, update.hash),
+          },
+        ]
+      );
     } catch (error: any) {
+      // checkForUpdates now rejects on a network or manifest failure, so a
+      // server being down is no longer indistinguishable from "up to date".
       setStatus(`Error: ${error.message}`);
       Alert.alert('Error', `Failed to check for updates: ${error.message}`);
     } finally {
@@ -95,60 +156,63 @@ export default function App() {
     }
   };
 
-  const handleDownload = async (url: string, version: string = '1.0.0') => {
+  const handleDownload = async (
+    url: string,
+    version: string,
+    hash?: string
+  ) => {
     if (!url.trim()) {
-      Alert.alert('Error', 'Please enter a bundle URL');
+      Alert.alert('Error', 'Please enter a package URL');
       return;
     }
 
     setLoading(true);
-    setStatus('Downloading bundle...');
+    setProgress(null);
+    setStatus('Downloading...');
     try {
-      const success = await downloadBundle(url.trim(), version);
-      if (success) {
-        setBundleVersion(version); // Update displayed bundle version
-        setStatus('Bundle downloaded successfully!');
-        Alert.alert(
-          'Download Complete',
-          'Bundle downloaded successfully. Reload the app to use the new bundle?',
-          [
-            { text: 'Later', style: 'cancel' },
-            { text: 'Reload Now', onPress: () => reloadBundle() },
-          ]
-        );
-      } else {
-        setStatus('Download failed');
-        Alert.alert('Error', 'Failed to download bundle');
-      }
+      await downloadBundle(url.trim(), version, {
+        hash,
+        onProgress: setProgress,
+      });
+      refreshVersions();
+      setStatus('Downloaded and verified.');
+      Alert.alert(
+        'Download complete',
+        'Reload the app to use the new bundle?',
+        [
+          { text: 'Later', style: 'cancel' },
+          { text: 'Reload now', onPress: reloadBundle },
+        ]
+      );
     } catch (error: any) {
+      // downloadBundle rejects rather than resolving false, so every failure
+      // (HTTP, integrity, disk) lands here with a reason.
       setStatus(`Error: ${error.message}`);
-      Alert.alert('Error', `Failed to download bundle: ${error.message}`);
+      Alert.alert('Error', `Failed to download: ${error.message}`);
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   };
 
-  const [appVersion, setAppVersion] = useState('');
-  const [bundleVersion, setBundleVersion] = useState('');
-
-  useEffect(() => {
-    setAppVersion(getAppVersion());
-    setBundleVersion(getBundleVersion());
-
-    // Automatically sync on mount (checks for mandatory updates by default)
-    // const autoSync = async () => {
-    //   try {
-    //     console.log('[App] Starting automatic sync...');
-    //     await sync();
-    //     // Update bundle version display after sync might have finished
-    //     setBundleVersion(getBundleVersion());
-    //   } catch (error) {
-    //     console.error('[App] Auto-sync failed:', error);
-    //   }
-    // };
-
-    // autoSync();
-  }, []);
+  const handleReset = () => {
+    Alert.alert(
+      'Reset to the packaged bundle?',
+      'This deletes every downloaded bundle. The app will reload.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            resetToDefault();
+            refreshVersions();
+            reloadBundle();
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -159,13 +223,22 @@ export default function App() {
         <Text style={styles.versionValue}>{appVersion || 'Loading...'}</Text>
         <Text style={styles.versionLabel}>Bundle Version:</Text>
         <Text style={styles.versionValue}>
-          {bundleVersion || 'No bundle installed'}
+          {bundleVersion || 'Packaged bundle'}
         </Text>
+        {pending ? (
+          <Text style={styles.versionLabel}>
+            An update is installed but not yet confirmed.
+          </Text>
+        ) : null}
       </View>
 
-      <View style={styles.section}>
+      <View style={[styles.section, styles.row]}>
         <Image
           source={require('./assets/images/example.png')}
+          style={styles.image}
+        />
+        <Image
+          source={require('./assets/images/sample.jpeg')}
           style={styles.image}
         />
       </View>
@@ -173,13 +246,12 @@ export default function App() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>1. Set Base URL</Text>
         <Text style={styles.description}>
-          Set the base URL where your bundles are hosted (e.g.,
-          http://your-server.com)
+          The folder that hosts manifest.json, e.g. https://your-server.com/ota
         </Text>
         <TextInput
           style={styles.input}
-          placeholder="http://your-server.com"
-          value={baseURL}
+          placeholder="https://your-server.com/ota"
+          value={baseURLInput}
           onChangeText={setBaseURLInput}
           autoCapitalize="none"
           autoCorrect={false}
@@ -195,10 +267,9 @@ export default function App() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>2. Sync (Auto-Mandatory)</Text>
+        <Text style={styles.sectionTitle}>2. Sync</Text>
         <Text style={styles.description}>
-          Automatically download and install mandatory updates in the
-          background.
+          Check the manifest and install whatever it offers.
         </Text>
         <TouchableOpacity
           style={[styles.button, styles.primaryButton]}
@@ -216,8 +287,7 @@ export default function App() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>3. Check for Updates (Manual)</Text>
         <Text style={styles.description}>
-          Manually check if an update is available and choose whether to
-          download it.
+          Check whether an update exists and decide whether to install it.
         </Text>
         <TouchableOpacity
           style={[styles.button, styles.secondaryButton]}
@@ -233,22 +303,22 @@ export default function App() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>4. Download Bundle (Manual URL)</Text>
+        <Text style={styles.sectionTitle}>4. Download a package by URL</Text>
         <Text style={styles.description}>
-          Download a bundle manually by providing a URL and version
+          Bypasses the manifest, so nothing verifies the download.
         </Text>
         <TextInput
           style={styles.input}
-          placeholder="https://your-server.com/index.android.bundle"
-          value={bundleURL}
-          onChangeText={setBundleURL}
+          placeholder="https://your-server.com/ota/android-package.zip"
+          value={packageURL}
+          onChangeText={setPackageURL}
           autoCapitalize="none"
           autoCorrect={false}
           editable={!loading}
         />
         <TouchableOpacity
           style={[styles.button, styles.secondaryButton]}
-          onPress={() => handleDownload(bundleURL)}
+          onPress={() => handleDownload(packageURL, 'manual')}
           disabled={loading}
         >
           {loading ? (
@@ -259,22 +329,54 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
+      {progress ? (
+        <View style={styles.statusContainer}>
+          <Text style={styles.statusText}>{formatProgress(progress)}</Text>
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  width: progress.totalBytes
+                    ? `${Math.min(
+                      100,
+                      (progress.receivedBytes / progress.totalBytes) * 100
+                    )}%`
+                    : '100%',
+                },
+              ]}
+            />
+          </View>
+        </View>
+      ) : null}
+
       {status ? (
         <View style={styles.statusContainer}>
           <Text style={styles.statusText}>{status}</Text>
         </View>
       ) : null}
 
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Reset</Text>
+        <Text style={styles.description}>
+          Delete every downloaded bundle and go back to the one in the binary.
+        </Text>
+        <TouchableOpacity
+          style={[styles.button, styles.dangerButton]}
+          onPress={handleReset}
+          disabled={loading}
+        >
+          <Text style={styles.buttonText}>Reset to packaged bundle</Text>
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.infoSection}>
         <Text style={styles.infoTitle}>How to use:</Text>
         <Text style={styles.infoText}>
-          1. Set your base URL where manifest.json is hosted{'\n'}
-          2. Host a manifest.json file with this structure:{'\n'}
-          {'{ "android": { "1.0.0": { "url": "...", "version": "1" } } }'}
-          {'\n'}
-          3. Use "Check for Updates" to fetch the manifest and detect updates
-          {'\n'}
-          4. After download, reload the app to apply changes
+          1. Build packages with `npx ota bundle --manifest --base-url ...
+          --app-version ...`{'\n'}
+          2. Upload ota-server-files/ to the base URL above{'\n'}
+          3. Sync, then reload to run the new bundle
         </Text>
       </View>
     </ScrollView>
@@ -285,6 +387,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   content: {
     padding: 20,
@@ -402,6 +508,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#E65100',
     lineHeight: 20,
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#BBDEFB',
+    marginTop: 10,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#1976D2',
+  },
+  dangerButton: {
+    backgroundColor: '#D32F2F',
   },
   image: {
     width: 100,

@@ -1,17 +1,18 @@
 {
   "android": {
     "1.0": {
-      "url": "https://your-server.com/bundles/android-package.zip",
+      "url": "https://your-server.com/ota/android-package.zip",
       "version": "1.1.0",
-      "isMandatory": false
+      "isMandatory": false,
+      "hash": "3b1f8c0d5e2a47c9b6d8e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5"
     }
   },
   "ios": {
     "1.0": {
-      "url": "https://your-server.com/bundles/ios-package.zip",
+      "url": "https://your-server.com/ota/ios-package.zip",
       "version": "1.1.0",
-      "isMandatory": false
+      "isMandatory": false,
+      "hash": "a4c7e9012b3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7"
     }
   }
 }
-
