@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "platform": "ios",
+  "appVersion": "1.0",
+  "bundleVersion": "0.0.1",
+  "createdAt": "2026-09-01T11:04:12.159Z",
+  "assets": {
+    "assets/src/assets/images/example.png": "d9bd44c0a82fcb0171202c3a182deb55f4c79533e920079d926fabf83dc20ff5",
+    "assets/src/assets/images/sample.jpeg": "0d1d68818e046c43e4a128dcf98a3d37ba2ae3f0f8e2c20e590600b0164ccbdc"
+  }
+}

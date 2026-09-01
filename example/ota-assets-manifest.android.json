@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "platform": "android",
+  "appVersion": "1.0",
+  "bundleVersion": "0.0.1",
+  "createdAt": "2026-09-01T11:03:57.775Z",
+  "assets": {
+    "drawable-mdpi/src_assets_images_example.png": "d9bd44c0a82fcb0171202c3a182deb55f4c79533e920079d926fabf83dc20ff5",
+    "drawable-mdpi/src_assets_images_sample.jpeg": "0d1d68818e046c43e4a128dcf98a3d37ba2ae3f0f8e2c20e590600b0164ccbdc",
+    "raw/keep.xml": "c3d24172105c8e019f21ddb5c09330428fa2122ade368b5071316282c241f0ee"
+  }
+}
