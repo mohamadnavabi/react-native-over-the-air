@@ -2,18 +2,55 @@
 
 This guide shows you how to build React Native bundles for use in OTA Updates.
 
-## Method 1: Using Metro Bundler Commands
+## Recommended Method: Using the OTA CLI
 
-### Building Bundle for Android
+The easiest way to build and package your bundles for both Android and iOS is to use the built-in CLI tool. It handles bundling and zipping assets automatically.
+
+### Building for all platforms
+```bash
+npx ota bundle
+```
+
+### Building for a specific platform
+```bash
+npx ota bundle android
+# OR
+npx ota bundle ios
+```
+
+### Incremental Builds (Optimized Asset Packaging)
+
+If your app has many assets and you only want to include new or changed assets in the OTA package, you can use incremental builds. This significantly reduces the size of the update for users.
+
+#### How it works:
+1. The CLI calculates hashes for all assets in the current build.
+2. It compares them with a manifest from a previous build.
+3. Assets that haven't changed are excluded from the ZIP package.
+4. The React Native app on the device will keep existing assets in the OTA directory and only update the ones included in the new ZIP.
+
+#### Usage:
+
+**1. Using the local manifest (automatic):**
+The CLI automatically saves a manifest named `ota-assets-manifest.{platform}.json` in your project root after each build. To build incrementally against the last build, use the `--incremental` flag:
 
 ```bash
-npx react-native bundle \
-  --platform android \
-  --dev false \
-  --entry-file index.js \
-  --bundle-output ./bundles/index.android.bundle \
-  --assets-dest ./bundles/android-assets
+npx ota bundle android --incremental
 ```
+
+**2. Using a specific base manifest:**
+If you want to ensure the update is incremental relative to a specific version (e.g., the version currently in the App Store), you can provide a base manifest:
+
+```bash
+npx ota bundle android --base-manifest=./path/to/base-manifest.android.json
+```
+
+> **Note:** For incremental updates to work reliably, the native side must not clear the OTA directory between updates. This library handles this automatically by versioning OTA directories per native app version.
+
+The CLI will create an `ota-server-files` directory containing:
+- `android-package.zip` (for Android)
+- `ios-package.zip` (for iOS)
+
+## Alternative Method 1: Using Metro Bundler Commands manually
 
 ### Building Bundle for iOS
 
@@ -144,6 +181,56 @@ Assets output path (images, fonts, etc.)
 # Reset cache
 --reset-cache
 ```
+
+## Hosting Bundles and Assets
+
+If your bundle includes assets (images, fonts, etc.), you should package them together in a ZIP file.
+
+### 1. Build the bundle with assets
+
+```bash
+# Android
+npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output ./bundles/index.android.bundle --assets-dest ./bundles
+
+# iOS
+npx react-native bundle --platform ios --dev false --entry-file index.js --bundle-output ./bundles/index.ios.bundle --assets-dest ./bundles
+```
+
+### 2. Create a ZIP package
+
+For assets to work, the directory structure inside the ZIP must match what Metro produces.
+
+**For Android:**
+
+```bash
+cd bundles
+zip -r android-package.zip index.android.bundle drawable-* raw
+```
+
+**For iOS:**
+
+```bash
+cd bundles
+zip -r ios-package.zip index.ios.bundle assets
+```
+
+### 3. Update manifest.json
+
+In your `manifest.json`, point to the `.zip` file instead of the `.bundle` file.
+
+```json
+{
+  "android": {
+    "1.0": {
+      "url": "https://your-server.com/bundles/android-package.zip",
+      "version": "1.0.1",
+      "isMandatory": true
+    }
+  }
+}
+```
+
+The library will automatically detect the `.zip` extension, download it, and extract it to the correct OTA directory.
 
 ## Hosting Bundles
 

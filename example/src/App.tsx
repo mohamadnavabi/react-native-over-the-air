@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Image,
 } from 'react-native';
 import {
   setBaseURL,
@@ -20,7 +21,7 @@ import {
   sync,
 } from 'react-native-over-the-air';
 
-const ROOT_URL = 'https://your-server.com/bundles';
+const ROOT_URL = 'https://ravanshenas.net/bundles';
 const BUNDLE_FILE_NAME = `index.${
   Platform.OS === 'ios' ? 'ios' : 'android'
 }.bundle`;
@@ -160,6 +161,13 @@ export default function App() {
         <Text style={styles.versionValue}>
           {bundleVersion || 'No bundle installed'}
         </Text>
+      </View>
+
+      <View style={styles.section}>
+        <Image
+          source={require('./assets/images/example.png')}
+          style={styles.image}
+        />
       </View>
 
       <View style={styles.section}>
@@ -394,5 +402,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#E65100',
     lineHeight: 20,
+  },
+  image: {
+    width: 100,
+    height: 100,
   },
 });
